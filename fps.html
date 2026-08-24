@@ -1,0 +1,521 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>FPS Game</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: Arial, sans-serif;
+            overflow: hidden;
+            background: #000;
+        }
+
+        canvas {
+            display: block;
+            width: 100vw;
+            height: 100vh;
+        }
+
+        #hud {
+            position: absolute;
+            width: 100%;
+            height: 100%;
+            pointer-events: none;
+        }
+
+        .crosshair {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+        }
+
+        .crosshair-center {
+            width: 20px;
+            height: 20px;
+            border: 2px solid #00ff00;
+            border-radius: 50%;
+            position: absolute;
+            top: -10px;
+            left: -10px;
+        }
+
+        .crosshair-dot {
+            width: 4px;
+            height: 4px;
+            background: #00ff00;
+            border-radius: 50%;
+            position: absolute;
+            top: -2px;
+            left: -2px;
+        }
+
+        .scope {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            width: 200px;
+            height: 200px;
+            border: 8px solid #000;
+            border-radius: 50%;
+            background: radial-gradient(circle, rgba(0,255,0,0.1) 0%, rgba(0,0,0,0.8) 100%);
+            box-shadow: 0 0 50px rgba(0,255,0,0.5), inset 0 0 20px rgba(0,255,0,0.2);
+            display: none;
+            z-index: 100;
+        }
+
+        .scope::before {
+            content: '';
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            width: 4px;
+            height: 4px;
+            background: #00ff00;
+            border-radius: 50%;
+            box-shadow: 0 0 10px #00ff00;
+        }
+
+        .hud-panel {
+            position: absolute;
+            color: #00ff00;
+            font-family: 'Courier New', monospace;
+            text-shadow: 0 0 10px #00ff00;
+            background: rgba(0, 0, 0, 0.5);
+            border: 2px solid #00ff00;
+            padding: 10px;
+        }
+
+        #ammo {
+            top: 20px;
+            right: 20px;
+            font-size: 18px;
+        }
+
+        #health {
+            top: 20px;
+            left: 20px;
+            font-size: 18px;
+        }
+
+        #score {
+            top: 100px;
+            left: 20px;
+            font-size: 18px;
+        }
+
+        #instructions {
+            bottom: 20px;
+            left: 50%;
+            transform: translateX(-50%);
+            font-size: 14px;
+            text-align: center;
+            width: 400px;
+        }
+
+        .damage-indicator {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            font-size: 48px;
+            color: #ff0000;
+            font-weight: bold;
+            text-shadow: 0 0 20px #ff0000;
+            pointer-events: none;
+            animation: damageFlash 0.3s;
+        }
+
+        @keyframes damageFlash {
+            0% { opacity: 1; }
+            100% { opacity: 0; }
+        }
+
+        .blood-screen {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(255, 0, 0, 0.3);
+            display: none;
+            animation: bloodFade 0.5s;
+        }
+
+        @keyframes bloodFade {
+            0% { opacity: 0.5; }
+            100% { opacity: 0; }
+        }
+    </style>
+</head>
+
+<body>
+    <canvas id="gameCanvas"></canvas>
+
+    <div id="hud">
+        <div class="crosshair">
+            <div class="crosshair-center">
+                <div class="crosshair-dot"></div>
+            </div>
+        </div>
+        <div class="scope" id="scope"></div>
+
+        <div class="hud-panel" id="health">HEALTH: 100</div>
+        <div class="hud-panel" id="ammo">AMMO: 30</div>
+        <div class="hud-panel" id="score">SCORE: 0</div>
+
+        <div class="hud-panel" id="instructions">
+            WASD: Move | Mouse: Look | Click: Shoot | Right Click: Aim
+        </div>
+    </div>
+
+    <script>
+        // Canvas setup
+        const canvas = document.getElementById('gameCanvas');
+        const ctx = canvas.getContext('2d');
+        canvas.width = window.innerWidth;
+        canvas.height = window.innerHeight;
+
+        // Game state
+        const player = {
+            x: 400,
+            y: 300,
+            angle: 0,
+            health: 100,
+            ammo: 30,
+            maxAmmo: 30,
+            speed: 5,
+            aiming: false
+        };
+
+        let score = 0;
+        let targets = [];
+        let bullets = [];
+        let bloodScreen = null;
+
+        // Keyboard input
+        const keys = {};
+        window.addEventListener('keydown', (e) => {
+            keys[e.key.toLowerCase()] = true;
+            if (e.key === ' ') e.preventDefault();
+        });
+        window.addEventListener('keyup', (e) => {
+            keys[e.key.toLowerCase()] = false;
+        });
+
+        // Mouse input
+        window.addEventListener('mousemove', (e) => {
+            const rect = canvas.getBoundingClientRect();
+            const dx = e.clientX - rect.left - player.x;
+            const dy = e.clientY - rect.top - player.y;
+            player.angle = Math.atan2(dy, dx);
+        });
+
+        window.addEventListener('mousedown', (e) => {
+            if (e.button === 0) shoot(); // Left click
+            if (e.button === 2) player.aiming = true; // Right click
+        });
+
+        window.addEventListener('mouseup', (e) => {
+            if (e.button === 2) player.aiming = false;
+        });
+
+        window.addEventListener('contextmenu', (e) => e.preventDefault());
+
+        // Target class
+        class Target {
+            constructor(x, y, size = 30) {
+                this.x = x;
+                this.y = y;
+                this.size = size;
+                this.health = 3;
+                this.color = '#ff0000';
+            }
+
+            draw() {
+                ctx.fillStyle = this.color;
+                ctx.beginPath();
+                ctx.arc(this.x, this.y, this.size, 0, Math.PI * 2);
+                ctx.fill();
+
+                // Target ring
+                ctx.strokeStyle = '#ffff00';
+                ctx.lineWidth = 2;
+                ctx.beginPath();
+                ctx.arc(this.x, this.y, this.size + 5, 0, Math.PI * 2);
+                ctx.stroke();
+
+                // Health indicator
+                ctx.fillStyle = '#00ff00';
+                ctx.font = 'bold 16px Arial';
+                ctx.textAlign = 'center';
+                ctx.fillText(this.health, this.x, this.y + 5);
+            }
+
+            isHit(bx, by) {
+                const dist = Math.hypot(this.x - bx, this.y - by);
+                return dist < this.size;
+            }
+
+            takeDamage() {
+                this.health--;
+                if (this.health <= 0) {
+                    return true; // Dead
+                }
+                this.color = '#ff6600';
+                return false;
+            }
+        }
+
+        // Bullet class
+        class Bullet {
+            constructor(x, y, angle) {
+                this.x = x;
+                this.y = y;
+                this.angle = angle;
+                this.speed = 10;
+                this.maxDistance = 1000;
+                this.distance = 0;
+            }
+
+            update() {
+                this.x += Math.cos(this.angle) * this.speed;
+                this.y += Math.sin(this.angle) * this.speed;
+                this.distance += this.speed;
+                return this.distance < this.maxDistance;
+            }
+
+            draw() {
+                ctx.fillStyle = '#ffff00';
+                ctx.beginPath();
+                ctx.arc(this.x, this.y, 3, 0, Math.PI * 2);
+                ctx.fill();
+            }
+        }
+
+        // Initialize targets
+        function initTargets() {
+            targets = [];
+            for (let i = 0; i < 5; i++) {
+                let x, y, overlap;
+                do {
+                    overlap = false;
+                    x = Math.random() * (canvas.width - 100) + 50;
+                    y = Math.random() * (canvas.height - 100) + 50;
+
+                    for (let t of targets) {
+                        if (Math.hypot(t.x - x, t.y - y) < 100) {
+                            overlap = true;
+                            break;
+                        }
+                    }
+                } while (overlap);
+                targets.push(new Target(x, y));
+            }
+        }
+
+        // Shoot
+        function shoot() {
+            if (player.ammo > 0) {
+                const bx = player.x + Math.cos(player.angle) * 30;
+                const by = player.y + Math.sin(player.angle) * 30;
+                bullets.push(new Bullet(bx, by, player.angle));
+                player.ammo--;
+                document.getElementById('ammo').textContent = `AMMO: ${player.ammo}`;
+
+                // Reload when empty
+                if (player.ammo === 0) {
+                    setTimeout(() => {
+                        player.ammo = player.maxAmmo;
+                        document.getElementById('ammo').textContent = `AMMO: ${player.ammo}`;
+                    }, 2000);
+                }
+            }
+        }
+
+        // Update
+        function update() {
+            // Player movement
+            if (keys['w']) {
+                player.x += Math.cos(player.angle) * player.speed;
+                player.y += Math.sin(player.angle) * player.speed;
+            }
+            if (keys['s']) {
+                player.x -= Math.cos(player.angle) * player.speed;
+                player.y -= Math.sin(player.angle) * player.speed;
+            }
+            if (keys['a']) {
+                player.x += Math.cos(player.angle - Math.PI / 2) * player.speed;
+                player.y += Math.sin(player.angle - Math.PI / 2) * player.speed;
+            }
+            if (keys['d']) {
+                player.x += Math.cos(player.angle + Math.PI / 2) * player.speed;
+                player.y += Math.sin(player.angle + Math.PI / 2) * player.speed;
+            }
+
+            // Keep player in bounds
+            player.x = Math.max(20, Math.min(canvas.width - 20, player.x));
+            player.y = Math.max(20, Math.min(canvas.height - 20, player.y));
+
+            // Update bullets
+            for (let i = bullets.length - 1; i >= 0; i--) {
+                if (!bullets[i].update()) {
+                    bullets.splice(i, 1);
+                    continue;
+                }
+
+                // Check hit
+                for (let j = targets.length - 1; j >= 0; j--) {
+                    if (targets[j].isHit(bullets[i].x, bullets[i].y)) {
+                        const isDead = targets[j].takeDamage();
+                        bullets.splice(i, 1);
+
+                        if (isDead) {
+                            score += 100;
+                            targets.splice(j, 1);
+                            document.getElementById('score').textContent = `SCORE: ${score}`;
+
+                            // Spawn new target
+                            if (targets.length === 0) {
+                                initTargets();
+                            }
+                        }
+                        break;
+                    }
+                }
+            }
+
+            // Check if player hit by target (simple collision)
+            for (let target of targets) {
+                const dist = Math.hypot(player.x - target.x, player.y - target.y);
+                if (dist < 50) {
+                    player.health = Math.max(0, player.health - 0.5);
+                    if (player.health > 0) {
+                        showBloodScreen();
+                    }
+                }
+            }
+
+            document.getElementById('health').textContent = `HEALTH: ${Math.ceil(player.health)}`;
+
+            if (player.health <= 0) {
+                gameOver();
+            }
+        }
+
+        // Show blood screen effect
+        function showBloodScreen() {
+            const div = document.createElement('div');
+            div.className = 'blood-screen';
+            div.style.display = 'block';
+            document.getElementById('hud').appendChild(div);
+            setTimeout(() => div.remove(), 500);
+        }
+
+        // Draw
+        function draw() {
+            // Clear canvas
+            ctx.fillStyle = '#1a1a2e';
+            ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+            // Draw grid background
+            ctx.strokeStyle = '#0f3460';
+            ctx.lineWidth = 1;
+            for (let i = 0; i < canvas.width; i += 50) {
+                ctx.beginPath();
+                ctx.moveTo(i, 0);
+                ctx.lineTo(i, canvas.height);
+                ctx.stroke();
+            }
+            for (let i = 0; i < canvas.height; i += 50) {
+                ctx.beginPath();
+                ctx.moveTo(0, i);
+                ctx.lineTo(canvas.width, i);
+                ctx.stroke();
+            }
+
+            // Draw player
+            ctx.fillStyle = '#00ff00';
+            ctx.beginPath();
+            ctx.arc(player.x, player.y, 10, 0, Math.PI * 2);
+            ctx.fill();
+
+            // Draw direction line
+            ctx.strokeStyle = '#00ff00';
+            ctx.lineWidth = 2;
+            ctx.beginPath();
+            ctx.moveTo(player.x, player.y);
+            ctx.lineTo(
+                player.x + Math.cos(player.angle) * 50,
+                player.y + Math.sin(player.angle) * 50
+            );
+            ctx.stroke();
+
+            // Draw targets
+            for (let target of targets) {
+                target.draw();
+            }
+
+            // Draw bullets
+            for (let bullet of bullets) {
+                bullet.draw();
+            }
+
+            // Update scope
+            if (player.aiming) {
+                document.getElementById('scope').style.display = 'block';
+            } else {
+                document.getElementById('scope').style.display = 'none';
+            }
+        }
+
+        // Game over
+        function gameOver() {
+            ctx.fillStyle = 'rgba(0, 0, 0, 0.7)';
+            ctx.fillRect(0, 0, canvas.width, canvas.height);
+            ctx.fillStyle = '#ff0000';
+            ctx.font = 'bold 64px Arial';
+            ctx.textAlign = 'center';
+            ctx.fillText('GAME OVER', canvas.width / 2, canvas.height / 2 - 50);
+            ctx.fillStyle = '#00ff00';
+            ctx.font = 'bold 32px Arial';
+            ctx.fillText(`FINAL SCORE: ${score}`, canvas.width / 2, canvas.height / 2 + 50);
+            ctx.font = '24px Arial';
+            ctx.fillText('Reload Page to Play Again', canvas.width / 2, canvas.height / 2 + 100);
+        }
+
+        // Game loop
+        function gameLoop() {
+            if (player.health > 0) {
+                update();
+                draw();
+            } else {
+                draw();
+            }
+            requestAnimationFrame(gameLoop);
+        }
+
+        // Start game
+        initTargets();
+        gameLoop();
+
+        // Handle window resize
+        window.addEventListener('resize', () => {
+            canvas.width = window.innerWidth;
+            canvas.height = window.innerHeight;
+        });
+    </script>
+</body>
+
+</html>
